@@ -68,8 +68,8 @@ export default class AppCreate extends Command {
       flags['read-only'] === 'true'
         ? true
         : flags['read-only'] === 'false'
-        ? false
-        : undefined;
+          ? false
+          : undefined;
 
     try {
       await this.got.post('v1/projects/', {
@@ -95,7 +95,7 @@ export default class AppCreate extends Command {
 
       if (error.response && error.response.statusCode === 409) {
         this.error(
-          `The app already exists. Please use a unique name for your app.`
+          `The app already exists. Please use a unique name for your app.`,
         );
       }
 
@@ -106,18 +106,27 @@ export default class AppCreate extends Command {
       ) {
         const body = JSON.parse(error.response.body);
 
+        //
         if (body.data.code === 'free_plan_platform') {
           this.error(
-            `The free plan is not available for ${platform} platform.`
+            `The free plan is not available for ${platform} platform. Please upgrade your plan.`,
           );
         }
 
         if (body.data.code === 'free_plan_count') {
-          this.error(`You are allowed to create only one app on the free plan`);
+          this.error(
+            `You are allowed to create only one app on the free plan. Please upgrade your plan.`,
+          );
         }
       }
-
-      this.error(`Could not create the app. Please try again.`);
+      //TODO prompting the tickets linkn is probably not needed
+      this.error(`Could not create the app.
+      Please consider:
+      1. Checking your network connection.
+      2. Upgrading your plan.
+      3. Checking for enough balance.
+      If the issue persists, please submit a ticket at https://console.liara.ir/tickets for further assistance.
+      `);
     }
   }
 
@@ -155,9 +164,9 @@ export default class AppCreate extends Command {
               return {
                 value: plan,
                 name: `RAM: ${ram}${' '.repeat(
-                  5 - ram.toString().length
+                  5 - ram.toString().length,
                 )} GB,  CPU: ${cpu}${' '.repeat(
-                  6 - cpu.toString().length
+                  6 - cpu.toString().length,
                 )}Core,  Disk: ${disk}${
                   ' '.repeat(5 - disk.toString().length) + 'GB'
                 }${storageClass || 'SSD'},  Price: ${price.toLocaleString()}${

@@ -66,7 +66,15 @@ export default class DiskCreate extends Command {
         this.error(`Invalid disk name.`);
       }
 
-      this.error(`Could not create the disk. Please try again.`);
+      if (error.response && error.response.data.message === `disk_limit`) {
+        this.error(`Not enough disk space. Please upgrade your plan.`);
+      }
+
+      this.error(`Could not create the disk. Please consider: \n
+      1. Allocating more disk space.\n
+      2. Upgrading your plan.\n
+      3. Check your network connection.\n
+      `);
     }
   }
 
@@ -74,14 +82,13 @@ export default class DiskCreate extends Command {
     this.spinner.start('Loading...');
 
     try {
-      const { projects } = await this.got(
-        'v1/projects'
-      ).json<IGetProjectsResponse>();
+      const { projects } =
+        await this.got('v1/projects').json<IGetProjectsResponse>();
       this.spinner.stop();
 
       if (projects.length === 0) {
         this.warn(
-          "Please create an app via 'liara app:create' command, first."
+          "Please create an app via 'liara app:create' command, first.",
         );
         this.exit(1);
       }

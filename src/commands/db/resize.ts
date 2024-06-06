@@ -43,10 +43,10 @@ export default class Resize extends Command {
       flags.disk === 'y'
         ? true
         : flags.disk === 'n'
-        ? false
-        : (await this.promptDisk()) === 'y'
-        ? true
-        : false;
+          ? false
+          : (await this.promptDisk()) === 'y'
+            ? true
+            : false;
 
     try {
       const database = await this.getDatabaseByHostname(hostname);
@@ -66,6 +66,7 @@ export default class Resize extends Command {
       if (error.response && error.response.body) {
         debug(JSON.stringify(error.response.body));
       }
+      //TODO : downgrade is not possible, one resize job is in progress
       this.error(`Could not change the plan now. Please try again later.`);
     }
   }
@@ -82,9 +83,8 @@ export default class Resize extends Command {
   }
 
   async getDatabaseByHostname(hostname: string) {
-    const { databases } = await this.got(
-      'v1/databases'
-    ).json<IGetDatabasesResponse>();
+    const { databases } =
+      await this.got('v1/databases').json<IGetDatabasesResponse>();
 
     if (!databases.length) {
       this.error(`Not found any database.
@@ -92,7 +92,7 @@ Please open up https://console.liara.ir/databases and create the database, first
     }
 
     const database = databases.find(
-      (database) => database.hostname === hostname
+      (database) => database.hostname === hostname,
     );
     return database;
   }
@@ -128,7 +128,7 @@ Please open up https://console.liara.ir/databases and create the database, first
                 value: plan,
                 name: `RAM: ${ram}${spacing(5, ram)}GB,  CPU: ${cpu}${spacing(
                   5,
-                  cpu
+                  cpu,
                 )}Core,  Disk: ${disk}${spacing(3, disk) + 'GB'}${
                   storageClass || 'SSD'
                 },  Price: ${price.toLocaleString()}${

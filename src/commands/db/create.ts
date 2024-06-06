@@ -119,7 +119,7 @@ export default class Create extends Command {
 
       if (error.response && error.response.statusCode === 409) {
         this.error(
-          `The database already exists. Please use a unique name for your database.`
+          `The database already exists. Please use a unique name for your database.`,
         );
       }
 
@@ -131,17 +131,25 @@ export default class Create extends Command {
         const body = JSON.parse(error.response.body);
 
         if (body.data.code === 'free_plan_platform') {
-          this.error(`The free plan is not available for ${type} database.`);
+          this.error(
+            `The free plan is not available for ${type} database. Please upgrade your plan.`,
+          );
         }
 
         if (body.data.code === 'free_plan_count') {
           this.error(
-            `You are allowed to create only one database on the free plan`
+            `You are allowed to create only one database on the free plan. Please upgrade your plan.`,
           );
         }
       }
 
-      this.error(`Could not create the database. Please try again.`);
+      this.error(`Could not create the database. \n
+      Please consider:\n
+      1. Checking your network connection.\n
+      2. Upgrading your plan.\n
+      3. Checking for enough balance.\n
+      If the issue persists, please submit a ticket at https://console.liara.ir/tickets for further assistance.
+      `);
     }
   }
 
@@ -187,9 +195,9 @@ export default class Create extends Command {
               return {
                 value: plan,
                 name: `RAM: ${ram}${' '.repeat(
-                  5 - ram.toString().length
+                  5 - ram.toString().length,
                 )} GB,  CPU: ${cpu}${' '.repeat(
-                  6 - cpu.toString().length
+                  6 - cpu.toString().length,
                 )}Core,  Disk: ${disk}${
                   ' '.repeat(5 - disk.toString().length) + 'GB'
                 }${storageClass || 'SSD'},  Price: ${price.toLocaleString()}${
@@ -256,7 +264,7 @@ export default class Create extends Command {
         message: 'Please select a version:',
         choices: [
           ...databaseVersions[type].map(
-            (obj: { label: string; value: string }) => obj.value
+            (obj: { label: string; value: string }) => obj.value,
           ),
         ],
       })) as { databaseVersion: string };
