@@ -63,7 +63,9 @@ export default class AppCreate extends Command {
       : await this.promptNetwork();
 
     const planID = flags.plan || (await this.promptPlan());
-
+    const bundlePlanID =
+      flags.bundlePlan || (await this.promptBundlePlan(planID));
+    console.log(bundlePlanID);
     const readOnly =
       flags['read-only'] === 'true'
         ? true
@@ -127,6 +129,34 @@ export default class AppCreate extends Command {
       3. Checking for enough balance.
       If the issue persists, please submit a ticket at https://console.liara.ir/tickets for further assistance.
       `);
+    }
+  }
+
+  async promptBundlePlan(plan: string) {
+    this.spinner.start('Loading...');
+
+    try {
+      const { plans } = await this.got('v1/me').json<{ plans: any }>();
+
+      this.spinner.stop();
+
+      const { bundlePlan } = (await inquirer.prompt({
+        name: 'bundlePlan',
+        type: 'list',
+        message: 'Please select a plan:',
+        choices: [
+          ...Object.keys(plans.projectBundlePlans)
+            .filter((bundlePlan) => {
+              return bundlePlan === plan;
+            })
+            .map((bundlePlan) => {}),
+        ],
+      })) as { bundlePlan: string };
+
+      return bundlePlan;
+    } catch (error) {
+      this.spinner.stop();
+      throw error;
     }
   }
 

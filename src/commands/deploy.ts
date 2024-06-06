@@ -44,6 +44,7 @@ import CreateArchiveException from '../errors/create-archive.js';
 import IGetProjectsResponse from '../types/get-project-response.js';
 import ReachedMaxSourceSizeError from '../errors/max-source-size.js';
 import getPlatformVersion from '../services/get-platform-version.js';
+import { BundlePlanError } from '../errors/bundle-plan.js';
 
 export default class Deploy extends Command {
   static description = 'deploy an app';
@@ -189,8 +190,13 @@ export default class Deploy extends Command {
       // @ts-ignore
       config['build-arg'] = { ...secondPriority, ...firstPriority };
     }
-
+    let bundlePlanID;
     try {
+      const { project } = await this.got(
+        `v1/projects/${config.app}`,
+      ).json<IProjectDetailsResponse>();
+      bundlePlanID = project.bundlePlanID;
+
       const response = await this.deploy(config);
 
       if (flags.detach) {
@@ -203,10 +209,6 @@ export default class Deploy extends Command {
         this.log(chalk.green('Deployment finished successfully.'));
         this.log(chalk.white('Open up the url below in your browser:'));
         this.log();
-
-        const { project } = await this.got(
-          `v1/projects/${config.app}`,
-        ).json<IProjectDetailsResponse>();
 
         const defaultSubdomain: string =
           config.region === 'iran' && !Boolean(project.network)
@@ -296,24 +298,28 @@ Please open up https://console.liara.ir/apps and unfreeze the app.`;
 
         return this.error(message);
       }
+      console.log('847834758458348349893849');
+      console.log('------------------------------');
+      console.log('847834758458348349893849');
+      console.log('------------------------------');
 
       if (
         error.response &&
         error.response.statusCode === 428 &&
-        error.data.code === 'max_deployment_count_in_day'
+        parsed.data.code === 'max_deployment_count_in_day'
       ) {
         return this.error(
-          `You have reached the maximum number of deployments for today. Please try again tomorrow.`,
+          BundlePlanError.max_deploy_per_day(bundlePlanID)! || 'test',
         );
       }
 
       if (
         error.response &&
         error.response.statusCode === 428 &&
-        error.data.code === 'germany_builder_not_allowed'
+        parsed.data.code === 'germany_builder_not_allowed'
       ) {
         return this.error(
-          `You are not allowed to deploy in Germany builder region. Please try another region.`,
+          BundlePlanError.germany_builder_not_allowed(bundlePlanID)! || 'test',
         );
       }
 
@@ -349,6 +355,9 @@ You may also want to switch to another region. Your current region is: ${chalk.c
         error instanceof ReachedMaxSourceSizeError ||
         (error.response && error.response.statusCode === 413)
       ) {
+        console.log('cur err msg');
+        BundlePlanError.mAX_SOURCE_SIZE(bundlePlanID)! || 'test';
+        console.log('last err msg');
         this.error(error.message);
       }
 
@@ -420,7 +429,8 @@ Additionally, you can also retry the build with the debug flag:
         this.debug(error.stack);
       } finally {
         // eslint-disable-next-line no-unsafe-finally
-        throw new ReachedMaxSourceSizeError();
+        // throw new ReachedMaxSourceSizeError();
+        BundlePlanError.MAX_SOURCE_SIZE(bun);
       }
     }
 
