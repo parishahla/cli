@@ -9,6 +9,7 @@ import { Flags, Errors } from '@oclif/core';
 import Command from '../../base.js';
 import ILiaraJSON from '../../types/liara-json.js';
 import { createDebugLogger } from '../../utils/output.js';
+import { BundlePlanError } from '../../errors/bundle-plan.js';
 
 interface Entry {
   metaData: {
@@ -97,6 +98,8 @@ export default class AppLogs extends Command {
         }
 
         if (error.response && error.response.statusCode === 428) {
+          console.log(error.response);
+          console.log(error.response.body);
           const message = `To view more logs, upgrade your bundle plan, first. 
 Then try again.
 https://console.liara.ir/apps/${project}/resize`;

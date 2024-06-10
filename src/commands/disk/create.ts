@@ -3,6 +3,7 @@ import inquirer from 'inquirer';
 import Command, { IGetProjectsResponse } from '../../base.js';
 import { Flags } from '@oclif/core';
 import { createDebugLogger } from '../../utils/output.js';
+import { BundlePlanError } from '../../errors/bundle-plan.js';
 
 export default class DiskCreate extends Command {
   static description = 'create a disk';
@@ -66,6 +67,11 @@ export default class DiskCreate extends Command {
         this.error(`Invalid disk name.`);
       }
 
+      if (error.response && error.response.status === 428) {
+        console.log(error.response.body);
+        this.error(BundlePlanError.max_disks_limit('free'));
+      }
+
       this.error(`Could not create the disk. Please try again.`);
     }
   }
@@ -74,14 +80,13 @@ export default class DiskCreate extends Command {
     this.spinner.start('Loading...');
 
     try {
-      const { projects } = await this.got(
-        'v1/projects'
-      ).json<IGetProjectsResponse>();
+      const { projects } =
+        await this.got('v1/projects').json<IGetProjectsResponse>();
       this.spinner.stop();
 
       if (projects.length === 0) {
         this.warn(
-          "Please create an app via 'liara app:create' command, first."
+          "Please create an app via 'liara app:create' command, first.",
         );
         this.exit(1);
       }

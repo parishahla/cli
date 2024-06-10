@@ -44,6 +44,7 @@ import CreateArchiveException from '../errors/create-archive.js';
 import IGetProjectsResponse from '../types/get-project-response.js';
 import ReachedMaxSourceSizeError from '../errors/max-source-size.js';
 import getPlatformVersion from '../services/get-platform-version.js';
+import { BundlePlanError } from '../errors/bundle-plan.js';
 
 export default class Deploy extends Command {
   static description = 'deploy an app';
@@ -190,6 +191,7 @@ export default class Deploy extends Command {
       config['build-arg'] = { ...secondPriority, ...firstPriority };
     }
 
+    let bundlePlanID: string;
     try {
       const response = await this.deploy(config);
 
@@ -207,6 +209,8 @@ export default class Deploy extends Command {
         const { project } = await this.got(
           `v1/projects/${config.app}`,
         ).json<IProjectDetailsResponse>();
+        // bundlePlanID = project.bundlePlanID;
+        // console.log(bundlePlanID);
 
         const defaultSubdomain: string =
           config.region === 'iran' && !Boolean(project.network)
@@ -238,7 +242,7 @@ export default class Deploy extends Command {
         if (flags['no-app-logs']) {
           process.exit(0);
         }
-
+        ////////////! here you can pass the bundlePlan
         this.log('Reading app logs...');
         await Logs.run([
           '--app',
@@ -267,6 +271,7 @@ export default class Deploy extends Command {
           : {};
 
       if (error.message === 'TIMEOUT') {
+        console.log(error.message);
         this.error('Build timed out. It took about 20 minutes.');
       }
 
@@ -303,7 +308,8 @@ Please open up https://console.liara.ir/apps and unfreeze the app.`;
         responseBody?.data?.code === 'max_deployment_count_in_day'
       ) {
         return this.error(
-          `You have reached the maximum number of deployments for today. Please try again tomorrow.`,
+          BundlePlanError.max_deploy_per_day(bundlePlanID!) ||
+            'You have reached the maximum number of deployments for today. Please try again tomorrow.',
         );
       }
 
@@ -316,7 +322,9 @@ Please open up https://console.liara.ir/apps and unfreeze the app.`;
 Then try again.
 https://console.liara.ir/apps/${config.app}/resize`;
 
-        return this.error(message);
+        return this.error(
+          BundlePlanError.germany_builder_not_allowed(bundlePlanID!) || message,
+        );
       }
 
       if (
@@ -351,7 +359,9 @@ You may also want to switch to another region. Your current region is: ${chalk.c
         error instanceof ReachedMaxSourceSizeError ||
         (error.response && error.response.statusCode === 413)
       ) {
-        this.error(error.message);
+        this.error(
+          BundlePlanError.max_source_size(bundlePlanID!) || error.message,
+        );
       }
 
       this.log(chalk.gray(this.config.userAgent));
