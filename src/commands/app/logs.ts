@@ -62,6 +62,7 @@ export default class AppLogs extends Command {
     const { flags } = await this.parse(AppLogs);
     let since: string | number = flags.since || 1;
     const { follow, colorize, timestamps } = flags;
+    console.log('logs b plan id');
 
     this.#timestamps = timestamps;
     this.#colorize = colorize;
@@ -74,6 +75,41 @@ export default class AppLogs extends Command {
 
     const project =
       flags.app || projectConfig.app || (await this.promptProject());
+
+    const now = Math.floor(Date.now() / 1000); // Current timestamp in seconds
+    let maxSince;
+    const bundlePlanID =
+      2 > 1 ? 'free' : 3 > 2 ? 'standard' : 0 < 1 ? 'pro' : 'nope';
+    console.log(bundlePlanID);
+
+    switch (bundlePlanID) {
+      case 'free':
+        maxSince = now - 3600; // 1 hour
+        break;
+      case 'standard':
+        maxSince = now - 2592000; // 30 days
+        break;
+      case 'pro':
+        maxSince = 0; // No limit
+        break;
+      default:
+        throw new Error('Unknown bundle plan type');
+    }
+    console.log('max since', maxSince);
+    console.log('since', since);
+    if (since && +since < +maxSince) {
+      console.error(
+        new Errors.CLIError(
+          BundlePlanError.max_logs_period(bundlePlanID),
+        ).render(),
+      );
+      process.exit(2);
+    }
+    //! for flags
+    //   if (since && +since < +maxSince) {
+    //   console.error(new Errors.CLIError(BundlePlanError.max_logs_period(bundlePlanID)).render());
+    //   process.exit(2);
+    //  }
 
     let pendingFetch = false;
     const fetchLogs = async () => {
@@ -98,11 +134,10 @@ export default class AppLogs extends Command {
         }
 
         if (error.response && error.response.statusCode === 428) {
-          console.log(error.response);
           console.log(error.response.body);
           const message = `To view more logs, upgrade your bundle plan, first. 
-Then try again.
-https://console.liara.ir/apps/${project}/resize`;
+                            Then try again.
+                            https://console.liara.ir/apps/${project}/resize`;
 
           // tslint:disable-next-line: no-console
           console.error(new Errors.CLIError(message).render());

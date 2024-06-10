@@ -114,7 +114,7 @@ export interface IProjectDetails {
   scale: number;
   envs: IEnvs[];
   planID: string;
-  // bundlePlanID: string,
+  bundlePlanID: string;
   fixedIPStatus: string;
   created_at: string;
   node: {

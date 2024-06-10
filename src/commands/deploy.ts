@@ -209,8 +209,8 @@ export default class Deploy extends Command {
         const { project } = await this.got(
           `v1/projects/${config.app}`,
         ).json<IProjectDetailsResponse>();
-        // bundlePlanID = project.bundlePlanID;
-        // console.log(bundlePlanID);
+        bundlePlanID = project.bundlePlanID;
+        console.log(bundlePlanID);
 
         const defaultSubdomain: string =
           config.region === 'iran' && !Boolean(project.network)
@@ -256,6 +256,7 @@ export default class Deploy extends Command {
           config['api-token'] || '',
           '--region',
           config.region || '',
+          bundlePlanID,
         ]);
       }
     } catch (error) {
