@@ -256,7 +256,6 @@ export default class Deploy extends Command {
           config['api-token'] || '',
           '--region',
           config.region || '',
-          bundlePlanID,
         ]);
       }
     } catch (error) {
