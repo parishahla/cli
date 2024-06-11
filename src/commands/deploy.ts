@@ -242,13 +242,13 @@ export default class Deploy extends Command {
         if (flags['no-app-logs']) {
           process.exit(0);
         }
-        ////////////! here you can pass the bundlePlan
+
         this.log('Reading app logs...');
         await Logs.run([
           '--app',
           config.app,
           '--since',
-          moment().unix().toString(),
+          moment().subtract(10, 'second').unix().toString(),
           '--follow',
           '--timestamps',
           '--colorize',

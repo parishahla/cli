@@ -4,9 +4,10 @@ import fs from 'fs-extra';
 import chalk from 'chalk';
 import moment from 'moment';
 import UAParser from 'ua-parser-js';
-import { Flags, Errors } from '@oclif/core';
+import * as chrono from 'chrono-node';
 
-import Command from '../../base.js';
+import { Flags, Errors } from '@oclif/core';
+import Command, { IProjectDetailsResponse } from '../../base.js';
 import ILiaraJSON from '../../types/liara-json.js';
 import { createDebugLogger } from '../../utils/output.js';
 import { BundlePlanError } from '../../errors/bundle-plan.js';
@@ -32,7 +33,7 @@ export default class AppLogs extends Command {
       description: 'app id',
       parse: async (app) => app.toLowerCase(),
     }),
-    since: Flags.integer({
+    since: Flags.string({
       char: 's',
       description: 'show logs since timestamp',
     }),
@@ -51,6 +52,10 @@ export default class AppLogs extends Command {
       description: 'colorize log output',
       default: false,
     }),
+    until: Flags.string({
+      char: 'u',
+      description: 'show logs until',
+    }),
   };
 
   static aliases = ['logs'];
@@ -61,10 +66,7 @@ export default class AppLogs extends Command {
   async run() {
     const { flags } = await this.parse(AppLogs);
     const now = Math.floor(Date.now() / 1000);
-
-    let since: string | number = flags.since || 1;
     const { follow, colorize, timestamps } = flags;
-    console.log('logs b plan id');
 
     this.#timestamps = timestamps;
     this.#colorize = colorize;
@@ -75,14 +77,26 @@ export default class AppLogs extends Command {
 
     const projectConfig = this.readProjectConfig(process.cwd());
 
-    const project =
+    const appName =
       flags.app || projectConfig.app || (await this.promptProject());
 
-    let maxSince;
-    const bundlePlanID = 'standard';
-    // 2 > 3 ? 'free' : 3 > 2 ? 'standard' : 0 < 1 ? 'pro' : 'nope';
-    console.log(bundlePlanID);
+    const { project } = await this.got(
+      `v1/projects/${appName}`,
+    ).json<IProjectDetailsResponse>();
+    let bundlePlanID: string = project.bundlePlanID;
 
+    let sinceTimestamp;
+    if (flags.since) {
+      console.log('flags.since', flags.since);
+      const parsedDate = chrono.parseDate(`${flags.since} ago`);
+      console.log('parsedDate', parsedDate);
+      const sinceUnix = moment(parsedDate).unix();
+      console.log('sinceUnix', sinceUnix);
+      sinceTimestamp = sinceUnix;
+      console.log('sinceTimestamp', sinceTimestamp);
+    }
+
+    let maxSince;
     switch (bundlePlanID) {
       case 'free':
         maxSince = now - 3600; // 1 hour
@@ -91,14 +105,15 @@ export default class AppLogs extends Command {
         maxSince = now - 2592000; // 30 days
         break;
       case 'pro':
-        maxSince = 0;
+        maxSince = now - 5184000; // 60 days
         break;
       default:
         throw new Error('Unknown bundle plan type');
     }
-    console.log('max since', maxSince);
-    console.log('since', since);
-    if (flags.since && +flags.since < +maxSince) {
+
+    let since: string | number = flags.since || maxSince;
+
+    if (flags.since && +sinceTimestamp! < +maxSince) {
       console.error(
         new Errors.CLIError(
           BundlePlanError.max_logs_period(bundlePlanID),
@@ -106,11 +121,18 @@ export default class AppLogs extends Command {
       );
       process.exit(2);
     }
-    //! for flags
-    //   if (since && +since < +maxSince) {
-    //   console.error(new Errors.CLIError(BundlePlanError.max_logs_period(bundlePlanID)).render());
-    //   process.exit(2);
-    //  }
+
+    // User will be able to see logs that occurred up until a specified time.
+    let untilTimestamp;
+    if (flags.until && +flags.until > now) {
+      console.log('flags.until', flags.until);
+      const parsedDate = chrono.parseDate(`in ${flags.until}`);
+      console.log('parsedDate', parsedDate);
+      const untilUnix = moment(parsedDate).unix();
+      console.log('untilUnix', untilUnix);
+      untilTimestamp = untilUnix;
+      console.log('untilTimestamp', untilTimestamp);
+    }
 
     let pendingFetch = false;
     const fetchLogs = async () => {
@@ -123,27 +145,27 @@ export default class AppLogs extends Command {
 
       try {
         const data = await this.got(
-          `v2/projects/${project}/logs?start=${since}`,
+          `v2/projects/${appName}/logs?start=${sinceTimestamp!}&direction=forward`,
         ).json<ILog>();
 
         logs = data.data[0].values;
       } catch (error) {
+        console.log(error.response);
         if (error.response && error.response.statusCode === 404) {
           // tslint:disable-next-line: no-console
           console.error(new Errors.CLIError('App not found.').render());
           process.exit(2);
         }
 
-        // if (error.response && error.response.statusCode === 428) {
-        //   console.log(error.response.body);
-        //   const message = `To view more logs, upgrade your bundle plan, first.
-        //                     Then try again.
-        //                     https://console.liara.ir/apps/${project}/resize`;
-
-        //   // tslint:disable-next-line: no-console
-        //   console.error(new Errors.CLIError(message).render());
-        //   process.exit(2);
-        // }
+        if (error.response && error.response.statusCode === 428) {
+          console.log(error.response.body);
+          const message = `To view more logs, upgrade your bundle plan, first.
+                            Then try again.
+                            https://console.liara.ir/apps/${appName}/resize`;
+          // tslint:disable-next-line: no-console
+          console.error(new Errors.CLIError(message).render());
+          process.exit(2);
+        }
 
         this.debug(error.stack);
       }
@@ -154,17 +176,20 @@ export default class AppLogs extends Command {
         // tslint:disable-next-line: no-console
         console.error(
           new Errors.CLIError(`${lastLog[1]}
-Sorry for inconvenience. Please contact us.`).render(),
+          Sorry for inconvenience. Please contact us.`).render(),
         );
         process.exit(1);
       }
 
       if (lastLog) {
         const unixTime = lastLog[0].slice(0, 10);
-        since = parseInt(unixTime) + 1;
+        console.log('--------------------------------- Last Log', unixTime);
+
+        const lastLogg = parseInt(unixTime);
+        console.log('--------------------------------- Last Log', lastLogg);
       }
 
-      for (const log of logs.reverse()) {
+      for (const log of logs) {
         this.#printLogLine(log);
       }
 
