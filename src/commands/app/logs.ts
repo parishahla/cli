@@ -65,8 +65,8 @@ export default class AppLogs extends Command {
 
   async run() {
     const { flags } = await this.parse(AppLogs);
-    const now = Math.floor(Date.now() / 1000);
     const { follow, colorize, timestamps } = flags;
+    const now = Math.floor(Date.now() / 1000); // current timestamp
 
     this.#timestamps = timestamps;
     this.#colorize = colorize;
@@ -84,19 +84,9 @@ export default class AppLogs extends Command {
       `v1/projects/${appName}`,
     ).json<IProjectDetailsResponse>();
     let bundlePlanID: string = project.bundlePlanID;
+    console.log('bundlePlanID', bundlePlanID);
 
-    let sinceTimestamp;
-    if (flags.since) {
-      console.log('flags.since', flags.since);
-      const parsedDate = chrono.parseDate(`${flags.since} ago`);
-      console.log('parsedDate', parsedDate);
-      const sinceUnix = moment(parsedDate).unix();
-      console.log('sinceUnix', sinceUnix);
-      sinceTimestamp = sinceUnix;
-      console.log('sinceTimestamp', sinceTimestamp);
-    }
-
-    let maxSince;
+    let maxSince: number;
     switch (bundlePlanID) {
       case 'free':
         maxSince = now - 3600; // 1 hour
@@ -111,9 +101,24 @@ export default class AppLogs extends Command {
         throw new Error('Unknown bundle plan type');
     }
 
-    let since: string | number = flags.since || maxSince;
+    let sinceTimestamp: number;
+    sinceTimestamp = maxSince || now - 60;
 
-    if (flags.since && +sinceTimestamp! < +maxSince) {
+    if (flags.since) {
+      // console.log('flags.since', flags.since);
+      const parsedDate = chrono.parseDate(`${flags.since} ago`);
+      // console.log('parsedDate', parsedDate);
+      const sinceUnix = moment(parsedDate).unix();
+      console.log('sinceUnix', sinceUnix);
+      sinceTimestamp = sinceUnix;
+      // console.log('sinceTimestamp', sinceTimestamp);
+    }
+
+    //end
+    // end must not be before start => throw error
+
+    // Timestamp should be less than the maximum timestamp
+    if (flags.since && sinceTimestamp! < maxSince) {
       console.error(
         new Errors.CLIError(
           BundlePlanError.max_logs_period(bundlePlanID),
@@ -121,18 +126,19 @@ export default class AppLogs extends Command {
       );
       process.exit(2);
     }
-
     // User will be able to see logs that occurred up until a specified time.
-    let untilTimestamp;
-    if (flags.until && +flags.until > now) {
+    let untilTimestamp: number;
+    if (flags.until) {
       console.log('flags.until', flags.until);
-      const parsedDate = chrono.parseDate(`in ${flags.until}`);
+      const parsedDate = chrono.parseDate(`${flags.until} ago`);
       console.log('parsedDate', parsedDate);
       const untilUnix = moment(parsedDate).unix();
       console.log('untilUnix', untilUnix);
       untilTimestamp = untilUnix;
       console.log('untilTimestamp', untilTimestamp);
     }
+    const start = flags.since && this.getStart();
+    const end = flags.until && this.getEnd();
 
     let pendingFetch = false;
     const fetchLogs = async () => {
@@ -144,9 +150,18 @@ export default class AppLogs extends Command {
       let logs: [string, string][] = [];
 
       try {
-        const data = await this.got(
-          `v2/projects/${appName}/logs?start=${sinceTimestamp!}&direction=forward`,
-        ).json<ILog>();
+        console.log(sinceTimestamp);
+        console.log(untilTimestamp || now);
+        console.log(now);
+
+        const url = `v2/projects/${appName}/logs`;
+        const data = await this.got(url, {
+          searchParams: {
+            start: sinceTimestamp,
+            end: untilTimestamp,
+            direction: 'forward',
+          },
+        }).json<ILog>();
 
         logs = data.data[0].values;
       } catch (error) {
@@ -170,8 +185,9 @@ export default class AppLogs extends Command {
         this.debug(error.stack);
       }
 
-      const lastLog = logs[0];
-
+      const lastLog = logs[logs.length - 1];
+      console.log('logs.length', logs.length);
+      console.log(lastLog);
       if (lastLog && lastLog[0] === 'Error') {
         // tslint:disable-next-line: no-console
         console.error(
@@ -185,8 +201,11 @@ export default class AppLogs extends Command {
         const unixTime = lastLog[0].slice(0, 10);
         console.log('--------------------------------- Last Log', unixTime);
 
-        const lastLogg = parseInt(unixTime);
-        console.log('--------------------------------- Last Log', lastLogg);
+        sinceTimestamp = parseInt(unixTime);
+        console.log(
+          '--------------------------------- Last Log',
+          sinceTimestamp,
+        );
       }
 
       for (const log of logs) {
@@ -249,6 +268,10 @@ export default class AppLogs extends Command {
 
     return content || {};
   }
+
+  getStart() {}
+
+  getEnd() {}
 }
 
 function colorfulAccessLog(message: string): string {
