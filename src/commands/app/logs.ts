@@ -68,10 +68,10 @@ export default class AppLogs extends Command {
 
   async run() {
     const { flags } = await this.parse(AppLogs);
-    const { follow, colorize, timestamps, until, since } = flags;
+    const { follow, colorize, timestamps } = flags;
     const now = Math.floor(Date.now() / 1000); // current timestamp
 
-    if (follow && until) {
+    if (follow && flags.until) {
       console.error(
         new Errors.CLIError(
           'The "follow" flag and "until" flag cannot be used together.',
@@ -96,7 +96,6 @@ export default class AppLogs extends Command {
       `v1/projects/${appName}`,
     ).json<IProjectDetailsResponse>();
     let bundlePlanID: string = project.bundlePlanID;
-    console.log('bundlePlanID', bundlePlanID);
 
     let maxSince: number;
     switch (bundlePlanID) {
@@ -113,20 +112,13 @@ export default class AppLogs extends Command {
         throw new Error('Unknown bundle plan type');
     }
 
-    if (since) {
-      this.#startTimeStamp = await this.getStart(since, maxSince);
-    } else {
-      this.#startTimeStamp = maxSince;
-    }
-    // this.#startTimeStamp =
-    //   since || (await this.getStart(since, maxSince)) || maxSince;
-    console.log('this.#startTimeStamp', this.#startTimeStamp);
-    this.#endTimeStamp = until || this.getEnd(flags.until);
-    console.log('this.#endTimeStamp', this.#endTimeStamp);
+    this.#startTimeStamp = flags.since ? this.getStart(flags.since) : maxSince;
+    this.#endTimeStamp = flags.until ? this.getEnd(flags.until) : now;
 
     //! end must not be before start => throw error
+
     // Timestamp should be less than the maximum timestamp
-    if (since && this.#startTimeStamp < maxSince) {
+    if (this.#startTimeStamp < maxSince) {
       console.error(
         new Errors.CLIError(
           BundlePlanError.max_logs_period(bundlePlanID),
@@ -137,101 +129,87 @@ export default class AppLogs extends Command {
 
     let pendingFetch = false;
     let logs: [string, string][] = [];
-    let lastLogUnix;
+    let lastLogUnix: number;
+
     const fetchLogs = async () => {
       if (pendingFetch) return;
+
       pendingFetch = true;
+      while (1) {
+        this.debug('Polling...');
 
-      this.debug('Polling...');
+        try {
+          const url = `v2/projects/${appName}/logs`;
+          const data = await this.got(url, {
+            searchParams: {
+              start: this.#startTimeStamp,
+              end: this.#endTimeStamp,
+              direction: 'forward',
+            },
+          }).json<ILog>();
 
-      try {
-        console.log('this.#startTimeStamp', this.#startTimeStamp);
-        console.log('this.#endTimeStamp', this.#endTimeStamp);
-        console.log(now);
+          // if (data.data.length === 0) {
+          //   console.log('No logs available to fetch.');
+          //   pendingFetch = false;
+          //   return;
+          // }
 
-        const url = `v2/projects/${appName}/logs`;
-        const data = await this.got(url, {
-          searchParams: {
-            start: this.#startTimeStamp,
-            end: this.#endTimeStamp ? this.#endTimeStamp : now - 1,
-            direction: 'forward',
-          },
-        }).json<ILog>();
+          logs = data.data[0].values;
+        } catch (error) {
+          // console.log(error.response.body);
+          if (error.response && error.response.statusCode === 404) {
+            // tslint:disable-next-line: no-console
+            console.error(new Errors.CLIError('App not found.').render());
+            process.exit(2);
+          }
 
-        logs = data.data[0].values;
-      } catch (error) {
-        console.log(error.response.body);
-        if (error.response && error.response.statusCode === 404) {
-          // tslint:disable-next-line: no-console
-          console.error(new Errors.CLIError('App not found.').render());
-          process.exit(2);
-        }
-
-        if (error.response && error.response.statusCode === 428) {
-          const message = `To view more logs, upgrade your bundle plan, first.
+          if (error.response && error.response.statusCode === 428) {
+            console.log(error.response.body);
+            const message = `To view more logs, upgrade your bundle plan, first.
                             Then try again.
                             https://console.liara.ir/apps/${appName}/resize`;
-          // tslint:disable-next-line: no-console
-          console.error(new Errors.CLIError(message).render());
-          process.exit(2);
+            // tslint:disable-next-line: no-console
+            console.error(new Errors.CLIError(message).render());
+            process.exit(2);
+          }
+
+          this.debug(error.stack);
         }
 
-        this.debug(error.stack);
-      }
+        const lastLog = logs[logs.length - 1];
+        // lastLogUnix = parseInt(lastLog[0].slice(0, 10));
+        // console.log('lastLogUnix', lastLogUnix);
 
-      if (logs.length === 0) {
-        console.log('No logs available to fetch.');
-        pendingFetch = false;
-        return;
-      }
+        if (lastLog) {
+          const unixTime = lastLog[0].slice(0, 10);
+          lastLogUnix = parseInt(unixTime);
+          this.#startTimeStamp = lastLogUnix + 1;
+        }
 
-      const lastLog = logs[logs.length - 1];
-      lastLogUnix = parseInt(lastLog[0].slice(0, 10));
-      console.log('lastLogUnix', lastLogUnix);
-      if (lastLog && lastLog[0] === 'Error') {
-        // tslint:disable-next-line: no-console
-        console.error(
-          new Errors.CLIError(`${lastLog[1]}
-          Sorry for inconvenience. Please contact us.`).render(),
-        );
-        process.exit(1);
-      }
+        for (const log of logs) {
+          this.#printLogLine(log);
+        }
 
-      if (lastLog) {
-        const unixTime = lastLog[0].slice(0, 10);
-        let lastLogUnix = parseInt(unixTime);
-        console.log('-------------- Last Log unix', lastLogUnix);
-        console.log('-------------- Last Log now ', now);
-        console.log(lastLogUnix <= now);
+        if (lastLogUnix > now) {
+          break;
+        }
       }
-
-      for (const log of logs) {
-        this.#printLogLine(log);
-      }
-      // < now ? parseInt(unixTime) : now;
-      //   fetchLogs();
-
       pendingFetch = false;
     };
 
-    if (lastLogUnix) {
-      while (lastLogUnix <= now) {
-        this.#startTimeStamp = lastLogUnix;
-        console.log('after last login timestamp', this.#startTimeStamp);
-        fetchLogs();
-      }
-    }
     if (follow) {
-      fetchLogs();
-      setInterval(fetchLogs, 1000);
+      while (true) {
+        await fetchLogs();
+        this.#endTimeStamp = Math.floor(Date.now() / 1000);
+        await this.sleep(3500);
+      }
     } else {
       fetchLogs();
     }
+  }
 
-    if (since && follow) {
-      fetchLogs();
-      setInterval(fetchLogs, 1000);
-    }
+  async sleep(miliseconds: number) {
+    return new Promise((resolve) => setTimeout(resolve, miliseconds));
   }
 
   #gray(message: string) {
@@ -280,21 +258,10 @@ export default class AppLogs extends Command {
     return content || {};
   }
 
-  async getStart(since: string | undefined, maxSince: number) {
-    console.log(since);
-    if (since) {
-      console.log('flags.since', since);
-      const parsedDate = chrono.parseDate(`${since} ago`);
-      console.log('parsedDate', parsedDate);
-      const sinceUnix = moment(parsedDate).unix();
-      console.log('sinceUnix', sinceUnix);
-      return sinceUnix;
-    } else {
-      console.log(maxSince);
-      return maxSince;
-
-      //! used to be maxSince || now -60
-    }
+  getStart(since: string) {
+    const parsedDate = chrono.parseDate(`${since} ago`);
+    const sinceUnix = moment(parsedDate).unix();
+    return sinceUnix;
   }
 
   getEnd(until: any) {
