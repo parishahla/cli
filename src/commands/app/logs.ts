@@ -63,10 +63,22 @@ export default class AppLogs extends Command {
   #timestamps = false;
   #colorize = false;
 
+  #startTimeStamp: any;
+  #endTimeStamp: any;
+
   async run() {
     const { flags } = await this.parse(AppLogs);
-    const { follow, colorize, timestamps } = flags;
+    const { follow, colorize, timestamps, until } = flags;
     const now = Math.floor(Date.now() / 1000); // current timestamp
+
+    if (follow && until) {
+      console.error(
+        new Errors.CLIError(
+          'The "follow" flag and "until" flag cannot be used together.',
+        ).render(),
+      );
+      process.exit(2);
+    }
 
     this.#timestamps = timestamps;
     this.#colorize = colorize;
@@ -101,24 +113,13 @@ export default class AppLogs extends Command {
         throw new Error('Unknown bundle plan type');
     }
 
-    let sinceTimestamp: number;
-    sinceTimestamp = maxSince || now - 60;
+    this.#startTimeStamp = flags.since || this.getStart(flags.since, maxSince);
+    this.#endTimeStamp = flags.until && this.getEnd(flags.until);
 
-    if (flags.since) {
-      // console.log('flags.since', flags.since);
-      const parsedDate = chrono.parseDate(`${flags.since} ago`);
-      // console.log('parsedDate', parsedDate);
-      const sinceUnix = moment(parsedDate).unix();
-      console.log('sinceUnix', sinceUnix);
-      sinceTimestamp = sinceUnix;
-      // console.log('sinceTimestamp', sinceTimestamp);
-    }
-
-    //end
-    // end must not be before start => throw error
-
+    //! end must not be before start => throw error
+    //!
     // Timestamp should be less than the maximum timestamp
-    if (flags.since && sinceTimestamp! < maxSince) {
+    if (flags.since && this.#startTimeStamp < maxSince) {
       console.error(
         new Errors.CLIError(
           BundlePlanError.max_logs_period(bundlePlanID),
@@ -126,19 +127,6 @@ export default class AppLogs extends Command {
       );
       process.exit(2);
     }
-    // User will be able to see logs that occurred up until a specified time.
-    let untilTimestamp: number;
-    if (flags.until) {
-      console.log('flags.until', flags.until);
-      const parsedDate = chrono.parseDate(`${flags.until} ago`);
-      console.log('parsedDate', parsedDate);
-      const untilUnix = moment(parsedDate).unix();
-      console.log('untilUnix', untilUnix);
-      untilTimestamp = untilUnix;
-      console.log('untilTimestamp', untilTimestamp);
-    }
-    const start = flags.since && this.getStart();
-    const end = flags.until && this.getEnd();
 
     let pendingFetch = false;
     const fetchLogs = async () => {
@@ -150,22 +138,22 @@ export default class AppLogs extends Command {
       let logs: [string, string][] = [];
 
       try {
-        console.log(sinceTimestamp);
-        console.log(untilTimestamp || now);
+        console.log(this.#startTimeStamp);
+        console.log(this.#endTimeStamp);
         console.log(now);
 
         const url = `v2/projects/${appName}/logs`;
         const data = await this.got(url, {
           searchParams: {
-            start: sinceTimestamp,
-            end: untilTimestamp,
+            start: this.#startTimeStamp,
+            end: this.#endTimeStamp,
             direction: 'forward',
           },
         }).json<ILog>();
 
         logs = data.data[0].values;
       } catch (error) {
-        console.log(error.response);
+        console.log(error.response.body);
         if (error.response && error.response.statusCode === 404) {
           // tslint:disable-next-line: no-console
           console.error(new Errors.CLIError('App not found.').render());
@@ -173,7 +161,6 @@ export default class AppLogs extends Command {
         }
 
         if (error.response && error.response.statusCode === 428) {
-          console.log(error.response.body);
           const message = `To view more logs, upgrade your bundle plan, first.
                             Then try again.
                             https://console.liara.ir/apps/${appName}/resize`;
@@ -185,9 +172,14 @@ export default class AppLogs extends Command {
         this.debug(error.stack);
       }
 
+      if (logs.length === 0) {
+        console.log('No logs available to fetch.');
+        pendingFetch = false;
+        return;
+      }
+
       const lastLog = logs[logs.length - 1];
-      console.log('logs.length', logs.length);
-      console.log(lastLog);
+
       if (lastLog && lastLog[0] === 'Error') {
         // tslint:disable-next-line: no-console
         console.error(
@@ -200,12 +192,10 @@ export default class AppLogs extends Command {
       if (lastLog) {
         const unixTime = lastLog[0].slice(0, 10);
         console.log('--------------------------------- Last Log', unixTime);
-
-        sinceTimestamp = parseInt(unixTime);
-        console.log(
-          '--------------------------------- Last Log',
-          sinceTimestamp,
-        );
+        this.#startTimeStamp = parseInt(unixTime);
+      } else {
+        // but we want the logs to finish until now
+        console.log('this is else,');
       }
 
       for (const log of logs) {
@@ -260,8 +250,8 @@ export default class AppLogs extends Command {
         content = fs.readJSONSync(liaraJSONPath) || {};
 
         content.app && (content.app = content.app.toLowerCase());
-      } catch (error) {
         content = {};
+      } catch (error) {
         this.error('Syntax error in `liara.json`!', error);
       }
     }
@@ -269,9 +259,33 @@ export default class AppLogs extends Command {
     return content || {};
   }
 
-  getStart() {}
+  getStart(since: any, maxSince: number) {
+    if (since) {
+      // console.log('flags.since', flags.since);
+      const parsedDate = chrono.parseDate(`${since} ago`);
+      // console.log('parsedDate', parsedDate);
+      const sinceUnix = moment(parsedDate).unix();
+      console.log('sinceUnix', sinceUnix);
+      return sinceUnix;
+      // console.log('sinceTimestamp', sinceTimestamp);
+    } else {
+      return maxSince;
+      //! used to be maxSince || now -60
+    }
+  }
 
-  getEnd() {}
+  getEnd(until: any) {
+    // User will be able to see logs that occurred up until a specified time. Logs are fetched from the very begining until the time user requested.
+    if (until) {
+      console.log('until', until);
+      const parsedDate = chrono.parseDate(`${until} ago`);
+      console.log('parsedDate', parsedDate);
+      const untilUnix = moment(parsedDate).unix();
+      console.log('untilUnix', untilUnix);
+      return untilUnix;
+    } else {
+    }
+  }
 }
 
 function colorfulAccessLog(message: string): string {
