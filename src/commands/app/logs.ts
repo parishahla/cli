@@ -68,7 +68,7 @@ export default class AppLogs extends Command {
 
   async run() {
     const { flags } = await this.parse(AppLogs);
-    const { follow, colorize, timestamps, until } = flags;
+    const { follow, colorize, timestamps, until, since } = flags;
     const now = Math.floor(Date.now() / 1000); // current timestamp
 
     if (follow && until) {
@@ -113,13 +113,20 @@ export default class AppLogs extends Command {
         throw new Error('Unknown bundle plan type');
     }
 
-    this.#startTimeStamp = flags.since || this.getStart(flags.since, maxSince);
-    this.#endTimeStamp = flags.until && this.getEnd(flags.until);
+    if (since) {
+      this.#startTimeStamp = await this.getStart(since, maxSince);
+    } else {
+      this.#startTimeStamp = maxSince;
+    }
+    // this.#startTimeStamp =
+    //   since || (await this.getStart(since, maxSince)) || maxSince;
+    console.log('this.#startTimeStamp', this.#startTimeStamp);
+    this.#endTimeStamp = until || this.getEnd(flags.until);
+    console.log('this.#endTimeStamp', this.#endTimeStamp);
 
     //! end must not be before start => throw error
-    //!
     // Timestamp should be less than the maximum timestamp
-    if (flags.since && this.#startTimeStamp < maxSince) {
+    if (since && this.#startTimeStamp < maxSince) {
       console.error(
         new Errors.CLIError(
           BundlePlanError.max_logs_period(bundlePlanID),
@@ -129,24 +136,24 @@ export default class AppLogs extends Command {
     }
 
     let pendingFetch = false;
+    let logs: [string, string][] = [];
+    let lastLogUnix;
     const fetchLogs = async () => {
       if (pendingFetch) return;
       pendingFetch = true;
 
       this.debug('Polling...');
 
-      let logs: [string, string][] = [];
-
       try {
-        console.log(this.#startTimeStamp);
-        console.log(this.#endTimeStamp);
+        console.log('this.#startTimeStamp', this.#startTimeStamp);
+        console.log('this.#endTimeStamp', this.#endTimeStamp);
         console.log(now);
 
         const url = `v2/projects/${appName}/logs`;
         const data = await this.got(url, {
           searchParams: {
             start: this.#startTimeStamp,
-            end: this.#endTimeStamp,
+            end: this.#endTimeStamp ? this.#endTimeStamp : now - 1,
             direction: 'forward',
           },
         }).json<ILog>();
@@ -179,7 +186,8 @@ export default class AppLogs extends Command {
       }
 
       const lastLog = logs[logs.length - 1];
-
+      lastLogUnix = parseInt(lastLog[0].slice(0, 10));
+      console.log('lastLogUnix', lastLogUnix);
       if (lastLog && lastLog[0] === 'Error') {
         // tslint:disable-next-line: no-console
         console.error(
@@ -191,25 +199,38 @@ export default class AppLogs extends Command {
 
       if (lastLog) {
         const unixTime = lastLog[0].slice(0, 10);
-        console.log('--------------------------------- Last Log', unixTime);
-        this.#startTimeStamp = parseInt(unixTime);
-      } else {
-        // but we want the logs to finish until now
-        console.log('this is else,');
+        let lastLogUnix = parseInt(unixTime);
+        console.log('-------------- Last Log unix', lastLogUnix);
+        console.log('-------------- Last Log now ', now);
+        console.log(lastLogUnix <= now);
       }
 
       for (const log of logs) {
         this.#printLogLine(log);
       }
+      // < now ? parseInt(unixTime) : now;
+      //   fetchLogs();
 
       pendingFetch = false;
     };
 
+    if (lastLogUnix) {
+      while (lastLogUnix <= now) {
+        this.#startTimeStamp = lastLogUnix;
+        console.log('after last login timestamp', this.#startTimeStamp);
+        fetchLogs();
+      }
+    }
     if (follow) {
       fetchLogs();
       setInterval(fetchLogs, 1000);
     } else {
-      await fetchLogs();
+      fetchLogs();
+    }
+
+    if (since && follow) {
+      fetchLogs();
+      setInterval(fetchLogs, 1000);
     }
   }
 
@@ -259,17 +280,19 @@ export default class AppLogs extends Command {
     return content || {};
   }
 
-  getStart(since: any, maxSince: number) {
+  async getStart(since: string | undefined, maxSince: number) {
+    console.log(since);
     if (since) {
-      // console.log('flags.since', flags.since);
+      console.log('flags.since', since);
       const parsedDate = chrono.parseDate(`${since} ago`);
-      // console.log('parsedDate', parsedDate);
+      console.log('parsedDate', parsedDate);
       const sinceUnix = moment(parsedDate).unix();
       console.log('sinceUnix', sinceUnix);
       return sinceUnix;
-      // console.log('sinceTimestamp', sinceTimestamp);
     } else {
+      console.log(maxSince);
       return maxSince;
+
       //! used to be maxSince || now -60
     }
   }
