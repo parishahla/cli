@@ -97,6 +97,7 @@ export default class AppLogs extends Command {
     ).json<IProjectDetailsResponse>();
     let bundlePlanID: string = project.bundlePlanID;
 
+    //! change them to moment.now
     let maxSince: number;
     switch (bundlePlanID) {
       case 'free':
@@ -129,82 +130,80 @@ export default class AppLogs extends Command {
 
     let pendingFetch = false;
     let logs: [string, string][] = [];
-    let lastLogUnix: number;
+    let lastLogUnix: number | null = null;
 
     const fetchLogs = async () => {
       if (pendingFetch) return;
 
       pendingFetch = true;
-      while (1) {
-        this.debug('Polling...');
 
-        try {
-          const url = `v2/projects/${appName}/logs`;
-          const data = await this.got(url, {
-            searchParams: {
-              start: this.#startTimeStamp,
-              end: this.#endTimeStamp,
-              direction: 'forward',
-            },
-          }).json<ILog>();
+      this.debug('Polling...');
 
-          // if (data.data.length === 0) {
-          //   console.log('No logs available to fetch.');
-          //   pendingFetch = false;
-          //   return;
-          // }
+      try {
+        const url = `v2/projects/${appName}/logs`;
+        const data = await this.got(url, {
+          searchParams: {
+            start: this.#startTimeStamp,
+            end: this.#endTimeStamp,
+            direction: 'forward',
+          },
+        }).json<ILog>();
 
-          logs = data.data[0].values;
-        } catch (error) {
-          // console.log(error.response.body);
-          if (error.response && error.response.statusCode === 404) {
-            // tslint:disable-next-line: no-console
-            console.error(new Errors.CLIError('App not found.').render());
-            process.exit(2);
-          }
+        logs = data.data[0].values;
+      } catch (error) {
+        // console.log(error.response.body);
+        if (error.response && error.response.statusCode === 404) {
+          // tslint:disable-next-line: no-console
+          console.error(new Errors.CLIError('App not found.').render());
+          process.exit(2);
+        }
 
-          if (error.response && error.response.statusCode === 428) {
-            console.log(error.response.body);
-            const message = `To view more logs, upgrade your bundle plan, first.
+        if (error.response && error.response.statusCode === 428) {
+          console.log(error.response.body);
+          const message = `To view more logs, upgrade your bundle plan, first.
                             Then try again.
                             https://console.liara.ir/apps/${appName}/resize`;
-            // tslint:disable-next-line: no-console
-            console.error(new Errors.CLIError(message).render());
-            process.exit(2);
-          }
-
-          this.debug(error.stack);
+          // tslint:disable-next-line: no-console
+          console.error(new Errors.CLIError(message).render());
+          process.exit(2);
         }
 
-        const lastLog = logs[logs.length - 1];
-        // lastLogUnix = parseInt(lastLog[0].slice(0, 10));
-        // console.log('lastLogUnix', lastLogUnix);
-
-        if (lastLog) {
-          const unixTime = lastLog[0].slice(0, 10);
-          lastLogUnix = parseInt(unixTime);
-          this.#startTimeStamp = lastLogUnix + 1;
-        }
-
-        for (const log of logs) {
-          this.#printLogLine(log);
-        }
-
-        if (lastLogUnix > now) {
-          break;
-        }
+        this.debug(error.stack);
       }
+
+      const lastLog = logs[logs.length - 1];
+
+      if (lastLog) {
+        const unixTime = lastLog[0].slice(0, 10);
+        lastLogUnix = parseInt(unixTime);
+        this.#startTimeStamp = lastLogUnix + 1;
+      } else {
+        this.#startTimeStamp = null;
+      }
+
+      for (const log of logs) {
+        this.#printLogLine(log);
+      }
+      console.log('this.#startTimeStamp ', this.#startTimeStamp);
+      console.log('this.#endTimeStamp ', this.#endTimeStamp);
+      console.log('lastLogUnix ', lastLogUnix);
+      console.log('now ', now);
+
       pendingFetch = false;
     };
 
+    while (
+      lastLogUnix + 3 <= now &&
+      this.#startTimeStamp + 1 !== this.#endTimeStamp
+    ) {
+      await fetchLogs();
+    }
+
     if (follow) {
-      while (true) {
-        await fetchLogs();
-        this.#endTimeStamp = Math.floor(Date.now() / 1000);
-        await this.sleep(3500);
-      }
-    } else {
-      fetchLogs();
+      this.#endTimeStamp = Math.floor(Date.now() / 1000);
+      await fetchLogs();
+      setInterval(fetchLogs, 1000);
+      // await this.sleep(1000);
     }
   }
 
@@ -330,3 +329,36 @@ function colorfulAccessLog(message: string): string {
       }"${COLOR_END}`;
     });
 }
+
+// if (data.data.length === 0) {
+//   console.log('No logs available to fetch.');
+//   pendingFetch = false;
+//   return;
+// }
+
+//  if (lastLogUnix + 1 >= now) {
+//       break;
+//     }
+
+// while (true) {
+// this.#endTimeStamp = Math.floor(Date.now() / 1000);
+// await fetchLogs();
+// setInterval(fetchLogs, 1000)
+// await this.sleep(3500);
+// }
+
+// this.#startTimeStamp = lastLog ? lastLogUnix + 1 : null;
+
+// console.log("lastLog", lastLog)
+// lastLogUnix = parseInt(lastLog[0].slice(0, 10));
+// console.log('lastLogUnix', lastLogUnix);
+
+//   console.log("data.data[0]", data.data[0])
+// console.log("data.data[0].values", data.data[0].values)
+
+// if (flags.until) {
+
+//   while (this.#startTimeStamp + 1 >  this.#endTimeStamp ) {
+//     fetchLogs()
+//   }
+// }
