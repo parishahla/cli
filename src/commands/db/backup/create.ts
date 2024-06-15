@@ -1,10 +1,11 @@
 import ora from 'ora';
 import inquirer from 'inquirer';
-import Command from '../../../base.js';
+import Command, { IProjectDetailsResponse } from '../../../base.js';
 import { Args, Flags, ux } from '@oclif/core';
 import { createDebugLogger } from '../../../utils/output.js';
 import IGetDatabasesResponse from '../../../types/get-dbs-response.js';
 import * as shamsi from 'shamsi-date-converter';
+import { BundlePlanError } from '../../../errors/bundle-plan.js';
 
 export default class BackUp extends Command {
   static description = 'create a database backup';
@@ -33,6 +34,12 @@ export default class BackUp extends Command {
 
     const hostname = flags.name || (await this.promptHostname());
 
+    const {
+      project: { bundlePlanID },
+    } = await this.got(
+      `v1/projects/${hostname}`,
+    ).json<IProjectDetailsResponse>();
+
     try {
       const database = await this.getDatabaseByHostname(hostname);
       if (database === undefined) {
@@ -43,11 +50,17 @@ export default class BackUp extends Command {
       await this.got.post(BackUp.PATH.replace('{database-id}', databaseID));
       this.log(`Backup task for database ${hostname} created.`);
     } catch (error) {
-      debug(error.message);
-
-      if (error.response && error.response.body) {
-        debug(JSON.stringify(error.response.body));
+      const err = JSON.parse(error.response.body);
+      debug(JSON.stringify(error.response.body));
+      console.log(err);
+      if (
+        error.response &&
+        err.statusCode === 428 &&
+        err.message.includes('Manual backup not available.')
+      ) {
+        this.error(BundlePlanError.manual_backup_not_allowed(bundlePlanID));
       }
+
       this.error(`Could not create backup task. Please try again.`);
     }
   }
@@ -64,9 +77,8 @@ export default class BackUp extends Command {
   }
 
   async getDatabaseByHostname(hostname: string) {
-    const { databases } = await this.got(
-      'v1/databases'
-    ).json<IGetDatabasesResponse>();
+    const { databases } =
+      await this.got('v1/databases').json<IGetDatabasesResponse>();
 
     if (!databases.length) {
       this.error(`Not found any database.
@@ -74,7 +86,7 @@ Please open up https://console.liara.ir/databases and create the database, first
     }
 
     const database = databases.find(
-      (database) => database.hostname === hostname
+      (database) => database.hostname === hostname,
     );
     return database;
   }

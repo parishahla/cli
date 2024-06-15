@@ -63,9 +63,6 @@ export default class AppLogs extends Command {
   #timestamps = false;
   #colorize = false;
 
-  #startTimeStamp: any;
-  #endTimeStamp: any;
-
   async run() {
     const { flags } = await this.parse(AppLogs);
     const { follow, colorize, timestamps } = flags;
@@ -89,15 +86,15 @@ export default class AppLogs extends Command {
 
     const projectConfig = this.readProjectConfig(process.cwd());
 
-    const appName =
+    const appName: string =
       flags.app || projectConfig.app || (await this.promptProject());
 
-    const { project } = await this.got(
+    const {
+      project: { bundlePlanID },
+    } = await this.got(
       `v1/projects/${appName}`,
     ).json<IProjectDetailsResponse>();
-    let bundlePlanID: string = project.bundlePlanID;
 
-    //! change them to moment.now
     let maxSince: number;
     switch (bundlePlanID) {
       case 'free':
@@ -113,13 +110,10 @@ export default class AppLogs extends Command {
         throw new Error('Unknown bundle plan type');
     }
 
-    this.#startTimeStamp = flags.since ? this.getStart(flags.since) : maxSince;
-    this.#endTimeStamp = flags.until ? this.getEnd(flags.until) : now;
-
-    //! end must not be before start => throw error
+    const start: number = flags.since ? this.getStart(flags.since) : maxSince;
 
     // Timestamp should be less than the maximum timestamp
-    if (this.#startTimeStamp < maxSince) {
+    if (start < maxSince) {
       console.error(
         new Errors.CLIError(
           BundlePlanError.max_logs_period(bundlePlanID),
@@ -128,84 +122,76 @@ export default class AppLogs extends Command {
       process.exit(2);
     }
 
-    let pendingFetch = false;
-    let logs: [string, string][] = [];
     let lastLogUnix: number | null = null;
 
-    const fetchLogs = async () => {
-      if (pendingFetch) return;
+    while (true) {
+      const logs = await this.fetchLogs(Math.max(start, lastLogUnix), appName);
 
-      pendingFetch = true;
+      if (!logs?.length && !follow) {
+        break;
+      }
 
-      this.debug('Polling...');
-
-      try {
-        const url = `v2/projects/${appName}/logs`;
-        const data = await this.got(url, {
-          searchParams: {
-            start: this.#startTimeStamp,
-            end: this.#endTimeStamp,
-            direction: 'forward',
-          },
-        }).json<ILog>();
-
-        logs = data.data[0].values;
-      } catch (error) {
-        // console.log(error.response.body);
-        if (error.response && error.response.statusCode === 404) {
-          // tslint:disable-next-line: no-console
-          console.error(new Errors.CLIError('App not found.').render());
-          process.exit(2);
-        }
-
-        if (error.response && error.response.statusCode === 428) {
-          console.log(error.response.body);
-          const message = `To view more logs, upgrade your bundle plan, first.
-                            Then try again.
-                            https://console.liara.ir/apps/${appName}/resize`;
-          // tslint:disable-next-line: no-console
-          console.error(new Errors.CLIError(message).render());
-          process.exit(2);
-        }
-
-        this.debug(error.stack);
+      for (const log of logs) {
+        this.#printLogLine(log);
       }
 
       const lastLog = logs[logs.length - 1];
 
       if (lastLog) {
         const unixTime = lastLog[0].slice(0, 10);
-        lastLogUnix = parseInt(unixTime);
-        this.#startTimeStamp = lastLogUnix + 1;
-      } else {
-        this.#startTimeStamp = null;
+        lastLogUnix = parseInt(unixTime) + 1;
       }
-
-      for (const log of logs) {
-        this.#printLogLine(log);
-      }
-      console.log('this.#startTimeStamp ', this.#startTimeStamp);
-      console.log('this.#endTimeStamp ', this.#endTimeStamp);
-      console.log('lastLogUnix ', lastLogUnix);
-      console.log('now ', now);
-
-      pendingFetch = false;
-    };
-
-    while (
-      lastLogUnix + 3 <= now &&
-      this.#startTimeStamp + 1 !== this.#endTimeStamp
-    ) {
-      await fetchLogs();
+      await this.sleep(1000);
     }
 
-    if (follow) {
-      this.#endTimeStamp = Math.floor(Date.now() / 1000);
-      await fetchLogs();
-      setInterval(fetchLogs, 1000);
-      // await this.sleep(1000);
-    }
+    console.log('this.#startTimeStamp ', start);
+    console.log('lastLogUnix ', lastLogUnix);
+    console.log('now ', now);
   }
+
+  fetchLogs = async (since, appName) => {
+    this.debug('Polling...');
+
+    try {
+      const url = `v2/projects/${appName}/logs`;
+      const data = await this.got(url, {
+        searchParams: {
+          start: since,
+          direction: 'forward',
+        },
+        timeout: {
+          request: 5000,
+        },
+      }).json<ILog>();
+
+      return data?.data[0]?.values || [];
+    } catch (error) {
+      if (error.response && error.response.statusCode === 404) {
+        // tslint:disable-next-line: no-console
+        console.error(new Errors.CLIError('App not found.').render());
+        process.exit(2);
+      }
+
+      if (error.response && error.response.statusCode === 428) {
+        console.log(error.response.body);
+        const message = `To view more logs, upgrade your bundle plan, first.
+                            Then try again.
+                            https://console.liara.ir/apps/${appName}/resize`;
+        // tslint:disable-next-line: no-console
+        console.error(new Errors.CLIError(message).render());
+        process.exit(2);
+      }
+
+      this.debug(error);
+
+      console.error(
+        new Errors.CLIError(
+          'Logs retention failed. Check for timing and Please enbale --debug to',
+        ).render(),
+      );
+      process.exit(2);
+    }
+  };
 
   async sleep(miliseconds: number) {
     return new Promise((resolve) => setTimeout(resolve, miliseconds));
@@ -258,22 +244,9 @@ export default class AppLogs extends Command {
   }
 
   getStart(since: string) {
-    const parsedDate = chrono.parseDate(`${since} ago`);
+    const parsedDate = chrono.parseDate(`${since}`);
     const sinceUnix = moment(parsedDate).unix();
     return sinceUnix;
-  }
-
-  getEnd(until: any) {
-    // User will be able to see logs that occurred up until a specified time. Logs are fetched from the very begining until the time user requested.
-    if (until) {
-      console.log('until', until);
-      const parsedDate = chrono.parseDate(`${until} ago`);
-      console.log('parsedDate', parsedDate);
-      const untilUnix = moment(parsedDate).unix();
-      console.log('untilUnix', untilUnix);
-      return untilUnix;
-    } else {
-    }
   }
 }
 
@@ -329,36 +302,3 @@ function colorfulAccessLog(message: string): string {
       }"${COLOR_END}`;
     });
 }
-
-// if (data.data.length === 0) {
-//   console.log('No logs available to fetch.');
-//   pendingFetch = false;
-//   return;
-// }
-
-//  if (lastLogUnix + 1 >= now) {
-//       break;
-//     }
-
-// while (true) {
-// this.#endTimeStamp = Math.floor(Date.now() / 1000);
-// await fetchLogs();
-// setInterval(fetchLogs, 1000)
-// await this.sleep(3500);
-// }
-
-// this.#startTimeStamp = lastLog ? lastLogUnix + 1 : null;
-
-// console.log("lastLog", lastLog)
-// lastLogUnix = parseInt(lastLog[0].slice(0, 10));
-// console.log('lastLogUnix', lastLogUnix);
-
-//   console.log("data.data[0]", data.data[0])
-// console.log("data.data[0].values", data.data[0].values)
-
-// if (flags.until) {
-
-//   while (this.#startTimeStamp + 1 >  this.#endTimeStamp ) {
-//     fetchLogs()
-//   }
-// }

@@ -69,4 +69,14 @@ export const BundlePlanError = {
             If you still have problems, please contact support by submitting a ticket at https://console.liara.ir/tickets.`;
     }
   },
+  manual_backup_not_allowed(bundlePlan: string) {
+    switch (bundlePlan) {
+      case 'free':
+        return `Manual backups are not allowed on the Free plan. Please upgrade your plan to enable manual backups.`;
+      case 'standard':
+        return `You have reached the limit of 2 manual backups per hour on the Standard plan. Please wait until the next hour or consider upgrading your plan.`;
+      default:
+        return `Manual backup creation Failed. Please check your plan details or contact support by submitting a ticket at https://console.liara.ir/tickets.`;
+    }
+  },
 };

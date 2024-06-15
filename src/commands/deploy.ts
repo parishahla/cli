@@ -210,7 +210,6 @@ export default class Deploy extends Command {
           `v1/projects/${config.app}`,
         ).json<IProjectDetailsResponse>();
         bundlePlanID = project.bundlePlanID;
-        console.log(bundlePlanID);
 
         const defaultSubdomain: string =
           config.region === 'iran' && !Boolean(project.network)
@@ -248,7 +247,7 @@ export default class Deploy extends Command {
           '--app',
           config.app,
           '--since',
-          moment().subtract(10, 'second').unix().toString(),
+          '1s ago',
           '--follow',
           '--timestamps',
           '--colorize',
@@ -271,6 +270,7 @@ export default class Deploy extends Command {
           : {};
 
       if (error.message === 'TIMEOUT') {
+        ////!
         console.log(error.message);
         this.error('Build timed out. It took about 20 minutes.');
       }
